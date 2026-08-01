@@ -2195,12 +2195,12 @@ MARKET SUMMARY: Markets remain resilient despite sideways consolidation. Breadth
                 </p>
 
                 <div style="text-align: center;">
-                  <a href="http://localhost:8000/#/market" class="btn">View Live Market Feed</a>
+                  <a href="${window.location.origin + window.location.pathname}#/market" class="btn">View Live Market Feed</a>
                 </div>
               </div>
               <div class="footer">
                 <p>🛡️ AI recommendations are generated for educational purposes and do not constitute financial advice. Always perform your own research before trading.</p>
-                <p>Sent to ${email} • <a href="http://localhost:8000/#/alerts">Manage alerts</a></p>
+                <p>Sent to ${email} • <a href="${window.location.origin + window.location.pathname}#/alerts">Manage alerts</a></p>
               </div>
             </div>
           </body>
@@ -4693,7 +4693,7 @@ Market Breadth: ${pulse ? pulse.ratio : '50'}% positive trend.`;
                 </div>
                 <div class="footer">
                   <p>🛡️ AI-generated analysis is educational only, not financial advice.</p>
-                  <p>Sent to ${targetEmail} • <a href="http://localhost:7788/#/alerts">Manage alerts</a></p>
+                  <p>Sent to ${targetEmail} • <a href="${window.location.origin + window.location.pathname}#/alerts">Manage alerts</a></p>
                 </div>
               </div>
             </body>
@@ -4711,7 +4711,8 @@ Market Breadth: ${pulse ? pulse.ratio : '50'}% positive trend.`;
                 name: userProfile?.displayName || "Trader",
                 digestType: "live-report",
                 coins: coins,
-                aiMarketSummary: aiSummary
+                aiMarketSummary: aiSummary,
+                htmlContent: htmlContent
               })
             });
 

@@ -154,21 +154,22 @@ def send_email_smtp(recipient_email, subject, html_content, text_content=""):
 # LLM SYSTEM PROMPT & BACKEND CHAT PROXY
 # ======================================================================
 
-NOVA_SYSTEM_PROMPT = """You are NOVA, an intelligent, versatile AI assistant built into the ANTIGRAVITY platform. While you possess deep expertise in cryptocurrency, blockchain, and financial markets (with access to real-time live market data from CoinGecko provided with each prompt), you function as a full general-purpose assistant capable of answering ANY type of question — coding, science, general knowledge, writing, casual conversation, logic, and beyond.
+NOVA_SYSTEM_PROMPT = """You are NOVA, an intelligent, versatile AI assistant built into the ANTIGRAVITY platform. While you possess deep expertise in cryptocurrency, blockchain, financial markets, and data analysis (with access to real-time live market data from CoinGecko provided with each prompt), you function as a full general-purpose assistant capable of answering ANY type of question — coding, science, general knowledge, writing, casual conversation, logic, and beyond.
 
 CORE GUIDELINES:
-- Answer questions naturally, conversationally, and directly, just like ChatGPT.
+- Answer questions naturally, conversationally, accurately, and directly, just like ChatGPT or Claude.
 - Tailor your response length, structure, and style appropriately to fit each specific question.
-- Do NOT force every answer into a fixed market analysis template or multi-section report framework.
+- Do NOT force every answer into a fixed market analysis template or multi-section report framework unless explicitly asked for market analysis.
 - Use formatting (headers, lists, bold text, code blocks) naturally where it improves clarity.
 - Use emojis only when they feel natural and appropriate — do not enforce an artificial emoji quota.
 
 GENERAL & NON-FINANCIAL QUESTIONS (Coding, Explanations, Science, General Knowledge, Casual Chat):
 - Respond in clear, engaging, and well-reasoned prose or standard markdown.
-- Do NOT attach financial risk disclaimers to non-financial queries (e.g. coding, math, general advice).
+- Do NOT attach financial risk disclaimers to non-financial queries (e.g. coding, math, general advice, explanations).
 
 CRYPTO & INVESTMENT ANALYSIS REQUESTS:
-- Ground all crypto price data and market stats in the real-time live CoinGecko data provided. Always cite exact prices, 24h/7d changes, and market cap ranks.
+- Ground all crypto price data and market stats in the real-time live CoinGecko data provided. Always cite exact prices, 24h/7d changes, and market cap ranks when relevant.
+- When evaluating coins or portfolios, look at price momentum, market breadth, and top gainers/losers provided in the context.
 - Only when the user is specifically asking for a coin analysis, portfolio audit, or trade verdict, provide a clear BUY / HOLD / SELL verdict with supporting technical and fundamental reasoning.
 - Include a brief risk disclaimer ONLY at the end of specific financial/coin investment analyses:
   ⚡ *Risk Disclaimer: This analysis is for educational purposes only. Cryptocurrency investments carry risk. Always do your own research (DYOR).*"""
@@ -180,6 +181,15 @@ def build_server_market_context(coins):
     total_gainers = len([c for c in coins if (c.get('price_change_percentage_24h') or 0) > 0])
     breadth = f"{((total_gainers / len(coins)) * 100):.1f}"
     
+    # Sort for gainers & losers summary
+    valid_coins = [c for c in coins if c.get('price_change_percentage_24h') is not None]
+    sorted_coins = sorted(valid_coins, key=lambda x: x.get('price_change_percentage_24h', 0), reverse=True)
+    top_gainers = sorted_coins[:3]
+    top_losers = sorted_coins[-3:] if len(sorted_coins) >= 3 else []
+    
+    gainers_str = ", ".join([f"{c.get('symbol', '').upper()}: +{c.get('price_change_percentage_24h', 0):.1f}%" for c in top_gainers])
+    losers_str = ", ".join([f"{c.get('symbol', '').upper()}: {c.get('price_change_percentage_24h', 0):.1f}%" for c in top_losers])
+
     top_table = "\n".join([
         f"  {c.get('market_cap_rank', 'N/A')}. {c.get('name')} ({c.get('symbol', '').upper()}): ${c.get('current_price', 0):,} | 24h: {c.get('price_change_percentage_24h', 0):.2f}%"
         for c in top20
@@ -187,10 +197,25 @@ def build_server_market_context(coins):
     
     return f"""=== LIVE MARKET DATA (from CoinGecko) ===
 Date/Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
-Market Breadth: {breadth}% of coins positive (24h)
+Market Breadth: {breadth}% of tracked coins positive (24h)
+Top 24h Gainers: {gainers_str if gainers_str else 'N/A'}
+Top 24h Losers: {losers_str if losers_str else 'N/A'}
+
 Top Cryptocurrencies:
 {top_table}
 === END MARKET DATA ==="""
+
+def get_generation_config(user_msg):
+    """Determine optimal temperature based on prompt intent (coding/math vs analysis/creative)."""
+    msg_lower = user_msg.lower()
+    is_code_or_math = any(kw in msg_lower for kw in ['code', 'python', 'javascript', 'html', 'css', 'func', 'bug', 'fix', 'error', 'math', 'calculate', 'json'])
+    return {
+        "temperature": 0.2 if is_code_or_math else 0.7,
+        "topK": 40,
+        "topP": 0.95,
+        "maxOutputTokens": 8192
+    }
+
 
 @app.route('/api/chat', methods=['POST'])
 def proxy_chat_llm():
@@ -226,12 +251,7 @@ def proxy_chat_llm():
     payload = {
         "system_instruction": {"parts": [{"text": NOVA_SYSTEM_PROMPT}]},
         "contents": contents,
-        "generationConfig": {
-            "temperature": 0.7,
-            "topK": 40,
-            "topP": 0.95,
-            "maxOutputTokens": 8192
-        }
+        "generationConfig": get_generation_config(user_message)
     }
 
     models_to_try = [requested_model, "gemini-2.0-flash", "gemini-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro"]
@@ -318,12 +338,7 @@ def proxy_chat_stream():
     payload = {
         "system_instruction": {"parts": [{"text": NOVA_SYSTEM_PROMPT}]},
         "contents": contents,
-        "generationConfig": {
-            "temperature": 0.7,
-            "topK": 40,
-            "topP": 0.95,
-            "maxOutputTokens": 8192
-        }
+        "generationConfig": get_generation_config(user_message)
     }
 
     models_to_try = [requested_model, "gemini-2.0-flash", "gemini-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro"]
@@ -497,13 +512,14 @@ def send_test_email():
         return jsonify({"error": message}), 500
 
 @app.route('/api/alerts/trigger', methods=['POST'])
+@app.route('/api/alerts/digest', methods=['POST'])
 def trigger_alert_email():
-    """POST /api/alerts/trigger"""
+    """POST /api/alerts/trigger or /api/alerts/digest"""
     data = request.json or {}
     recipient_email = data.get('email') or get_sender_email()
     digest_type = data.get('digestType', 'realtime-alert')
     coin_name = data.get('coinName') or data.get('coin') or 'Market'
-    html_content = data.get('htmlContent')
+    html_content = data.get('htmlContent') or data.get('aiMarketSummary')
 
     if not is_email_configured():
         return jsonify({"error": "Sender email not configured. Please set credentials via /api/config/email."}), 400
@@ -534,13 +550,18 @@ def create_alert():
     if not all(k in data for k in ('coin', 'target_price', 'condition')):
         return jsonify({"error": "Missing required fields (coin, target_price, condition)"}), 400
 
+    try:
+        target_price = float(data['target_price'])
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid target_price. Must be a valid numeric value."}), 400
+
     recipient_email = data.get('email') or get_sender_email() or "user@localhost"
     alert_id = data.get('id', "alert_" + str(int(time.time() * 1000)))
     alert = {
         'id': alert_id,
         'email': recipient_email,
         'coin': data['coin'].lower().strip().replace(' ', '-'),
-        'target_price': float(data['target_price']),
+        'target_price': target_price,
         'condition': data['condition'],
         'created_at': data.get('created_at', time.strftime("%Y-%m-%dT%H:%M:%SZ"))
     }
@@ -575,7 +596,7 @@ def delete_alert(alert_id):
 def get_crypto_prices():
     try:
         with alerts_lock:
-            coins = list(set([a['coin'] for a in active_alerts if 'coin' in a]))
+            coins = list(set([a['coin'].lower().strip().replace(' ', '-') for a in active_alerts if 'coin' in a]))
         if not coins:
             return {}
         ids = ",".join(coins)
@@ -597,7 +618,7 @@ def background_price_monitor():
                 prices = get_crypto_prices()
                 alerts_to_remove = []
                 for alert in alerts_snapshot:
-                    coin = alert.get('coin', '').lower()
+                    coin = alert.get('coin', '').lower().strip().replace(' ', '-')
                     if coin in prices and 'usd' in prices[coin]:
                         current_price = prices[coin]['usd']
                         target_price = alert.get('target_price', 0)
