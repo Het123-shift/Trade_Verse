@@ -187,11 +187,11 @@ def build_server_market_context(coins):
     top_gainers = sorted_coins[:3]
     top_losers = sorted_coins[-3:] if len(sorted_coins) >= 3 else []
     
-    gainers_str = ", ".join([f"{c.get('symbol', '').upper()}: +{c.get('price_change_percentage_24h', 0):.1f}%" for c in top_gainers])
-    losers_str = ", ".join([f"{c.get('symbol', '').upper()}: {c.get('price_change_percentage_24h', 0):.1f}%" for c in top_losers])
+    gainers_str = ", ".join([f"{(c.get('symbol') or '').upper()}: +{(c.get('price_change_percentage_24h') or 0):.1f}%" for c in top_gainers])
+    losers_str = ", ".join([f"{(c.get('symbol') or '').upper()}: {(c.get('price_change_percentage_24h') or 0):.1f}%" for c in top_losers])
 
     top_table = "\n".join([
-        f"  {c.get('market_cap_rank', 'N/A')}. {c.get('name')} ({c.get('symbol', '').upper()}): ${c.get('current_price', 0):,} | 24h: {c.get('price_change_percentage_24h', 0):.2f}%"
+        f"  {c.get('market_cap_rank') or 'N/A'}. {c.get('name') or 'Unknown'} ({(c.get('symbol') or '').upper()}): ${(c.get('current_price') or 0):,} | 24h: {(c.get('price_change_percentage_24h') or 0):.2f}%"
         for c in top20
     ])
     

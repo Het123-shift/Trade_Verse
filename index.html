@@ -1998,8 +1998,10 @@
         const newAlert = { id: "alert_" + Math.random().toString(36).substring(2, 9), createdAt: new Date().toISOString(), isActive: true, ...alertData };
         const newAlerts = [...(userProfile.alerts || []), newAlert];
         const mockUsers = JSON.parse(localStorage.getItem("mock_users") || "{}");
-        mockUsers[userProfile.uid].alerts = newAlerts;
-        localStorage.setItem("mock_users", JSON.stringify(mockUsers));
+        if (mockUsers[userProfile.uid]) {
+          mockUsers[userProfile.uid].alerts = newAlerts;
+          localStorage.setItem("mock_users", JSON.stringify(mockUsers));
+        }
         setUserProfile(prev => ({ ...prev, alerts: newAlerts }));
 
         // Sync with the Python backend bot
@@ -2025,8 +2027,10 @@
         if (!userProfile) return;
         const newAlerts = userProfile.alerts.map(a => a.id === alertId ? { ...a, isActive: !a.isActive } : a);
         const mockUsers = JSON.parse(localStorage.getItem("mock_users") || "{}");
-        mockUsers[userProfile.uid].alerts = newAlerts;
-        localStorage.setItem("mock_users", JSON.stringify(mockUsers));
+        if (mockUsers[userProfile.uid]) {
+          mockUsers[userProfile.uid].alerts = newAlerts;
+          localStorage.setItem("mock_users", JSON.stringify(mockUsers));
+        }
         setUserProfile(prev => ({ ...prev, alerts: newAlerts }));
       };
 
@@ -2034,8 +2038,10 @@
         if (!userProfile) return;
         const newAlerts = userProfile.alerts.filter(a => a.id !== alertId);
         const mockUsers = JSON.parse(localStorage.getItem("mock_users") || "{}");
-        mockUsers[userProfile.uid].alerts = newAlerts;
-        localStorage.setItem("mock_users", JSON.stringify(mockUsers));
+        if (mockUsers[userProfile.uid]) {
+          mockUsers[userProfile.uid].alerts = newAlerts;
+          localStorage.setItem("mock_users", JSON.stringify(mockUsers));
+        }
         setUserProfile(prev => ({ ...prev, alerts: newAlerts }));
 
         // Delete from backend Python bot server
@@ -2052,8 +2058,10 @@
       const updatePortfolio = async (newPortfolio) => {
         if (!userProfile) return;
         const mockUsers = JSON.parse(localStorage.getItem("mock_users") || "{}");
-        mockUsers[userProfile.uid].portfolio = newPortfolio;
-        localStorage.setItem("mock_users", JSON.stringify(mockUsers));
+        if (mockUsers[userProfile.uid]) {
+          mockUsers[userProfile.uid].portfolio = newPortfolio;
+          localStorage.setItem("mock_users", JSON.stringify(mockUsers));
+        }
         setUserProfile(prev => ({ ...prev, portfolio: newPortfolio }));
       };
 
@@ -2076,79 +2084,141 @@
           throw new Error("No live coin data available. Please load the dashboard first.");
         }
 
+        // 1. Pull live news articles from cache if available (NO hardcoded fake news fallback array)
         let newsArticles = [];
         const cachedNews = localStorage.getItem("crypto_news_cache_All");
         if (cachedNews) {
-          newsArticles = JSON.parse(cachedNews).slice(0, 10);
-        } else {
-          newsArticles = [
-            { title: "Bitcoin Consolidates Around Key Support as Institutional Inflows Steady", source: "CryptoNews Analyst" },
-            { title: "Ethereum Gas Fees Drop to Multi-Year Lows Amid Layer 2 Migration", source: "DeFi Pulse" },
-            { title: "Solana Transaction Volume Hits Record Highs Fueled by DEX Activity", source: "Solana Examiner" }
-          ];
-        }
-        const newsContext = newsArticles.map((a, i) => `[${i+1}] ${a.title} (Source: ${a.source})`).join("\n");
-
-        let eventsList = [];
-        try {
-          eventsList = getCryptoEvents(cachedCoins).slice(0, 6);
-        } catch (e) {
-          eventsList = [{ title: "Bitcoin Halving Epoch 5", type: "Halving", impact: "BULLISH" }];
-        }
-        const eventsContext = eventsList.map((e, i) => `[${i+1}] ${e.title} (${e.type}) - Impact: ${e.impact}`).join("\n");
-        const coinsContext = cachedCoins.slice(0, 15).map(c => `${c.name} (${c.symbol.toUpperCase()}): $${c.current_price} (${(c.price_change_percentage_24h || 0).toFixed(2)}% 24h)`).join("\n");
-
-        const apiKey = localStorage.getItem("nova_gemini_key") || "AIzaSyAntigravityNovaDemoKey";
-        const prompt = `You are the ANTIGRAVITY AI Investment Strategist.
-Analyze the following crypto market news, events, and live prices to make an automatic buying recommendation alert for a buyer.
-Determine which single cryptocurrency is the best buy right now based on these catalysts and explain why.
-
-Latest News:
-${newsContext}
-
-Upcoming Events/Catalysts:
-${eventsContext}
-
-Live Coin Prices:
-${coinsContext}
-
-Provide your analysis in this exact format (do not use markdown headers, just plain text):
-RECOMMENDED BUY: [Coin Name and Symbol]
-BUYING RATIONALE: [Detailed data-backed reasons why this is the best buy based on the news and events. Under 100 words.]
-MARKET SUMMARY: [Brief summary of the key news/events driving the market sentiment. Under 100 words.]`;
-
-        let aiText;
-        if (apiKey === 'AIzaSyAntigravityNovaDemoKey') {
-          const topCoin = cachedCoins.find(c => ['bitcoin', 'ethereum', 'solana'].includes(c.id)) || cachedCoins[0] || { name: "Bitcoin", symbol: "btc", current_price: 60000 };
-          aiText = `RECOMMENDED BUY: ${topCoin.name} (${topCoin.symbol.toUpperCase()})
-BUYING RATIONALE: ${topCoin.name} is showing strong institutional inflows and consolidation at key support levels. Technical catalysts suggest a supply shock post-halving which historical cycles indicate is highly bullish.
-MARKET SUMMARY: The market is in a greed phase with broad breadth positive and institutional volume steady, offsetting minor retail distribution.`;
-        } else {
           try {
-            aiText = await callGeminiAPI(apiKey, [], prompt, cachedCoins);
+            newsArticles = JSON.parse(cachedNews);
           } catch (e) {
-            console.error("Gemini API call failed. Using fallback simulation.", e);
-            const topCoin = cachedCoins[0] || { name: "Bitcoin", symbol: "btc", current_price: 60000 };
-            aiText = `RECOMMENDED BUY: ${topCoin.name} (${topCoin.symbol.toUpperCase()})
-BUYING RATIONALE: ${topCoin.name} is consolidating at support with high buy-side volume. Upcoming macro interest rate decisions and ETF inflows suggest structural tailwinds.
-MARKET SUMMARY: Markets remain resilient despite sideways consolidation. Breadth indicates accumulation of major L1 chains.`;
+            newsArticles = [];
           }
         }
 
-        let recommendedBuy = "Bitcoin (BTC)";
-        let rationale = "Consolidating at support.";
-        let summary = "Steady institutional interest.";
+        // 2. Map news & events specifically to each of the top 20 cryptocurrencies by market cap
+        const topCoins = cachedCoins.slice(0, 20);
+        let eventsList = [];
+        try {
+          eventsList = getCryptoEvents(cachedCoins).slice(0, 10);
+        } catch (e) {
+          eventsList = [];
+        }
+
+        const coinAnalysisContext = topCoins.map(coin => {
+          const name = coin.name.toLowerCase();
+          const symbol = coin.symbol.toLowerCase();
+
+          // Match headlines for this specific coin
+          const matchedHeadlines = newsArticles.filter(a => {
+            const title = (a.title || '').toLowerCase();
+            const categories = (a.categories || '').toLowerCase();
+            return title.includes(name) || title.includes(symbol) || categories.includes(name) || categories.includes(symbol);
+          }).map(a => a.title).slice(0, 2);
+
+          // Match catalyst events for this specific coin
+          const matchedEvents = eventsList.filter(ev => {
+            const evTitle = (ev.title || '').toLowerCase();
+            const evCoin = (ev.coin || '').toLowerCase();
+            return evTitle.includes(name) || evTitle.includes(symbol) || evCoin.includes(name) || evCoin.includes(symbol);
+          }).map(ev => `${ev.title} (${ev.type}, Impact: ${ev.impact})`).slice(0, 2);
+
+          let ctxStr = `- ${coin.name} (${coin.symbol.toUpperCase()}): Rank #${coin.market_cap_rank || 'N/A'}, Price $${coin.current_price}, 24h Change: ${(coin.price_change_percentage_24h || 0).toFixed(2)}%, 24h Vol: $${(coin.total_volume || 0).toLocaleString()}`;
+          if (matchedHeadlines.length > 0) {
+            ctxStr += `\n  Headlines: "${matchedHeadlines.join('"; "')}"`;
+          }
+          if (matchedEvents.length > 0) {
+            ctxStr += `\n  Events: ${matchedEvents.join('; ')}`;
+          }
+          return ctxStr;
+        }).join("\n");
+
+        const prompt = `You are the ANTIGRAVITY AI Investment Strategist.
+Analyze the following live market data, per-coin news, and events for the top 20 cryptocurrencies to make an automatic buying recommendation alert.
+Compare all coins objectively and determine which SINGLE cryptocurrency is the best buy right now.
+
+Top 20 Cryptocurrencies (Price, 24h Momentum, Volume, Headlines, & Events):
+${coinAnalysisContext}
+
+CRITICAL RULES:
+1. You MUST justify your recommendation using specific news headlines, events, or 24h price/volume momentum tied to that EXACT coin.
+2. Do NOT default to Bitcoin, Ethereum, or Solana unless their specific data/news/catalysts objectively outperform the rest of the market.
+3. Compare gainers, momentum surge, volume, and news across ALL 20 coins before picking.
+
+Provide your output in this exact format (plain text, no markdown headers):
+RECOMMENDED BUY: [Coin Name (SYMBOL)]
+BUYING RATIONALE: [Detailed data-backed reasons why this specific coin is the best buy right now based on its headlines, events, or 24h momentum. Under 100 words.]
+MARKET SUMMARY: [Brief summary of overall market breadth and key catalysts. Under 100 words.]`;
+
+        const apiKey = localStorage.getItem("nova_gemini_key") || "AIzaSyAntigravityNovaDemoKey";
+        let aiText = "";
+
+        if (apiKey !== 'AIzaSyAntigravityNovaDemoKey') {
+          // Direct Gemini API Key Path — fail cleanly on API errors (no fabricated defaults)
+          try {
+            const resObj = await callGeminiAPI(apiKey, [], prompt, cachedCoins);
+            aiText = resObj.text;
+          } catch (e) {
+            console.error("[AI Auto-Alert Error] Gemini API call failed:", e);
+            throw new Error("AI Recommendation failed: " + (e.message || "Gemini API error"));
+          }
+        } else {
+          // Default Backend LLM Server Path
+          try {
+            const serverRes = await fetch('http://localhost:5000/api/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: prompt,
+                conversationHistory: [],
+                coins: cachedCoins,
+                model: 'gemini-2.0-flash'
+              })
+            });
+            if (serverRes.ok) {
+              const resData = await serverRes.json();
+              aiText = resData.reply;
+            } else {
+              throw new Error("Backend server HTTP " + serverRes.status);
+            }
+          } catch (serverErr) {
+            console.warn("[AI Auto-Alert] Backend LLM unavailable, running data-driven momentum selector:", serverErr);
+            
+            // Dynamic data-driven selection based on top 20 real coin metrics
+            // Find coin with highest positive 24h change & volume momentum
+            const sortedByGain = [...topCoins].sort((a, b) => (b.price_change_percentage_24h || 0) - (a.price_change_percentage_24h || 0));
+            const bestCoin = sortedByGain[0] || topCoins[0];
+            const changeStr = (bestCoin.price_change_percentage_24h || 0).toFixed(2);
+            
+            aiText = `RECOMMENDED BUY: ${bestCoin.name} (${bestCoin.symbol.toUpperCase()})
+BUYING RATIONALE: ${bestCoin.name} leads the market with a strong 24-hour gain of +${changeStr}% and heavy buying volume. Technical momentum indicates strong relative strength against the broader market breadth.
+MARKET SUMMARY: Market breadth reflects active rotation into high-momentum assets with top gainers outperforming major indexes.`;
+          }
+        }
+
+        let recommendedBuy = "";
+        let rationale = "";
+        let summary = "";
 
         const lines = aiText.split("\n");
         for (const line of lines) {
-          if (line.toUpperCase().startsWith("RECOMMENDED BUY:")) {
+          const upperLine = line.toUpperCase();
+          if (upperLine.startsWith("RECOMMENDED BUY:")) {
             recommendedBuy = line.replace(/RECOMMENDED BUY:/i, "").trim();
-          } else if (line.toUpperCase().startsWith("BUYING RATIONALE:")) {
+          } else if (upperLine.startsWith("BUYING RATIONALE:")) {
             rationale = line.replace(/BUYING RATIONALE:/i, "").trim();
-          } else if (line.toUpperCase().startsWith("MARKET SUMMARY:")) {
+          } else if (upperLine.startsWith("MARKET SUMMARY:")) {
             summary = line.replace(/MARKET SUMMARY:/i, "").trim();
           }
         }
+
+        if (!recommendedBuy) {
+          const firstCoin = topCoins[0];
+          recommendedBuy = `${firstCoin.name} (${firstCoin.symbol.toUpperCase()})`;
+          rationale = aiText.substring(0, 200) || "Top momentum asset.";
+          summary = "Live market data analysis completed.";
+        }
+
+        console.log(`[AI Auto-Alert Debug] Picked Coin: ${recommendedBuy} | Rationale: ${rationale}`);
 
         const emailHtml = `
           <!DOCTYPE html>

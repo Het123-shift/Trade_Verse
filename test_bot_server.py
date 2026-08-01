@@ -159,6 +159,18 @@ class TestBuildMarketContext(unittest.TestCase):
         ctx = self.bs.build_server_market_context(coins)
         self.assertIn("CoinGecko", ctx)
 
+    def test_handles_none_fields(self):
+        coins = [{
+            "market_cap_rank": None,
+            "name": None,
+            "symbol": None,
+            "current_price": None,
+            "price_change_percentage_24h": None
+        }]
+        ctx = self.bs.build_server_market_context(coins)
+        self.assertIn("Unknown", ctx)
+        self.assertIn("$0", ctx)
+
 
 class TestAlertTriggerLogic(unittest.TestCase):
     """Unit-test the price-comparison logic used in the background monitor."""
