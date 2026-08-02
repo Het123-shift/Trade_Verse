@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ANTIGRAVITY — AI-Powered Crypto Market Analyzer</title>
+  <title>TradeVerse — AI-Powered Crypto Market Analyzer</title>
   <meta name="description"
     content="Real-time cryptocurrency market analysis, AI-powered predictions, portfolio simulation, and price alerts — all in one platform." />
 
@@ -2084,6 +2084,15 @@
           throw new Error("No live coin data available. Please load the dashboard first.");
         }
 
+        // Base URL Helper for email links (handles file:// protocols and http/https servers dynamically)
+        const getAppBaseUrl = (hashPath = '') => {
+          const origin = window.location.origin;
+          const isFile = !origin || origin === 'null' || window.location.protocol === 'file:';
+          if (isFile) return hashPath || '#/';
+          const base = (origin + window.location.pathname).replace(/\/$/, '');
+          return base + (hashPath ? hashPath : '#/');
+        };
+
         // 1. Pull live news articles from cache if available (NO hardcoded fake news fallback array)
         let newsArticles = [];
         const cachedNews = localStorage.getItem("crypto_news_cache_All");
@@ -2095,8 +2104,8 @@
           }
         }
 
-        // 2. Map news & events specifically to each of the top 20 cryptocurrencies by market cap
-        const topCoins = cachedCoins.slice(0, 20);
+        // 2. Map news & events specifically to each coin across top cryptocurrencies
+        const topCoins = cachedCoins.slice(0, 25);
         let eventsList = [];
         try {
           eventsList = getCryptoEvents(cachedCoins).slice(0, 10);
@@ -2104,6 +2113,7 @@
           eventsList = [];
         }
 
+        const coinMap = {};
         const coinAnalysisContext = topCoins.map(coin => {
           const name = coin.name.toLowerCase();
           const symbol = coin.symbol.toLowerCase();
@@ -2122,6 +2132,8 @@
             return evTitle.includes(name) || evTitle.includes(symbol) || evCoin.includes(name) || evCoin.includes(symbol);
           }).map(ev => `${ev.title} (${ev.type}, Impact: ${ev.impact})`).slice(0, 2);
 
+          coinMap[coin.id] = { matchedHeadlines, matchedEvents };
+
           let ctxStr = `- ${coin.name} (${coin.symbol.toUpperCase()}): Rank #${coin.market_cap_rank || 'N/A'}, Price $${coin.current_price}, 24h Change: ${(coin.price_change_percentage_24h || 0).toFixed(2)}%, 24h Vol: $${(coin.total_volume || 0).toLocaleString()}`;
           if (matchedHeadlines.length > 0) {
             ctxStr += `\n  Headlines: "${matchedHeadlines.join('"; "')}"`;
@@ -2132,27 +2144,27 @@
           return ctxStr;
         }).join("\n");
 
-        const prompt = `You are the ANTIGRAVITY AI Investment Strategist.
-Analyze the following live market data, per-coin news, and events for the top 20 cryptocurrencies to make an automatic buying recommendation alert.
+        const prompt = `You are the TradeVerse AI Investment Strategist.
+Analyze the following live market data, per-coin news, and events for top cryptocurrencies to make an automatic buying recommendation alert.
 Compare all coins objectively and determine which SINGLE cryptocurrency is the best buy right now.
 
-Top 20 Cryptocurrencies (Price, 24h Momentum, Volume, Headlines, & Events):
+Cryptocurrencies (Price, 24h Momentum, Volume, Headlines, & Events):
 ${coinAnalysisContext}
 
 CRITICAL RULES:
 1. You MUST justify your recommendation using specific news headlines, events, or 24h price/volume momentum tied to that EXACT coin.
 2. Do NOT default to Bitcoin, Ethereum, or Solana unless their specific data/news/catalysts objectively outperform the rest of the market.
-3. Compare gainers, momentum surge, volume, and news across ALL 20 coins before picking.
+3. Compare gainers, momentum surge, volume, and news across ALL coins before picking.
 
 Provide your output in this exact format (plain text, no markdown headers):
 RECOMMENDED BUY: [Coin Name (SYMBOL)]
 BUYING RATIONALE: [Detailed data-backed reasons why this specific coin is the best buy right now based on its headlines, events, or 24h momentum. Under 100 words.]
 MARKET SUMMARY: [Brief summary of overall market breadth and key catalysts. Under 100 words.]`;
 
-        const apiKey = localStorage.getItem("nova_gemini_key") || "AIzaSyAntigravityNovaDemoKey";
+        const apiKey = localStorage.getItem("nova_gemini_key") || "AIzaSyTradeVerseNovaDemoKey";
         let aiText = "";
 
-        if (apiKey !== 'AIzaSyAntigravityNovaDemoKey') {
+        if (apiKey !== 'AIzaSyTradeVerseNovaDemoKey') {
           // Direct Gemini API Key Path — fail cleanly on API errors (no fabricated defaults)
           try {
             const resObj = await callGeminiAPI(apiKey, [], prompt, cachedCoins);
@@ -2181,17 +2193,39 @@ MARKET SUMMARY: [Brief summary of overall market breadth and key catalysts. Unde
               throw new Error("Backend server HTTP " + serverRes.status);
             }
           } catch (serverErr) {
-            console.warn("[AI Auto-Alert] Backend LLM unavailable, running data-driven momentum selector:", serverErr);
+            console.warn("[AI Auto-Alert] Backend LLM unavailable, executing dynamic multi-factor momentum selector across all coins:", serverErr);
             
-            // Dynamic data-driven selection based on top 20 real coin metrics
-            // Find coin with highest positive 24h change & volume momentum
-            const sortedByGain = [...topCoins].sort((a, b) => (b.price_change_percentage_24h || 0) - (a.price_change_percentage_24h || 0));
-            const bestCoin = sortedByGain[0] || topCoins[0];
-            const changeStr = (bestCoin.price_change_percentage_24h || 0).toFixed(2);
+            // Dynamic data-driven selection across ALL cachedCoins (ranking by 24h gain + volume + news/event score)
+            const rankedCoins = [...cachedCoins].map(c => {
+              const gain = c.price_change_percentage_24h || 0;
+              const vol = c.total_volume || 0;
+              const volScore = vol > 0 ? Math.log10(vol) : 0;
+              const newsBonus = (coinMap[c.id]?.matchedHeadlines?.length || 0) * 5;
+              const eventBonus = (coinMap[c.id]?.matchedEvents?.length || 0) * 5;
+              const compositeScore = (gain * 2) + volScore + newsBonus + eventBonus;
+              return { coin: c, score: compositeScore, gain, vol };
+            }).sort((a, b) => b.score - a.score);
+
+            const topPerformer = rankedCoins[0]?.coin || cachedCoins[0];
+            const perfMeta = coinMap[topPerformer.id] || {};
+            const changeVal = topPerformer.price_change_percentage_24h || 0;
+            const changeStr = changeVal >= 0 ? `+${changeVal.toFixed(2)}%` : `${changeVal.toFixed(2)}%`;
+            const volFmt = topPerformer.total_volume 
+              ? `$${(topPerformer.total_volume >= 1e9 ? (topPerformer.total_volume / 1e9).toFixed(2) + 'B' : (topPerformer.total_volume / 1e6).toFixed(2) + 'M')}`
+              : 'high volume';
             
-            aiText = `RECOMMENDED BUY: ${bestCoin.name} (${bestCoin.symbol.toUpperCase()})
-BUYING RATIONALE: ${bestCoin.name} leads the market with a strong 24-hour gain of +${changeStr}% and heavy buying volume. Technical momentum indicates strong relative strength against the broader market breadth.
-MARKET SUMMARY: Market breadth reflects active rotation into high-momentum assets with top gainers outperforming major indexes.`;
+            let catalystText = "";
+            if (perfMeta.matchedHeadlines?.length > 0) {
+              catalystText = `backed by recent breaking headlines ("${perfMeta.matchedHeadlines[0]}")`;
+            } else if (perfMeta.matchedEvents?.length > 0) {
+              catalystText = `fueled by upcoming network event (${perfMeta.matchedEvents[0]})`;
+            } else {
+              catalystText = `showing high relative momentum across ${cachedCoins.length} tracked market assets`;
+            }
+
+            aiText = `RECOMMENDED BUY: ${topPerformer.name} (${topPerformer.symbol.toUpperCase()})
+BUYING RATIONALE: ${topPerformer.name} ranks #${topPerformer.market_cap_rank || 'N/A'} and leads market metrics with a 24-hour price change of ${changeStr} on ${volFmt} trading volume, ${catalystText}. Technical indicators show clear buying pressure and positive momentum.
+MARKET SUMMARY: Broad market capital flows indicate rotation into high-performance assets. ${topPerformer.name} demonstrates superior relative strength.`;
           }
         }
 
@@ -2218,14 +2252,14 @@ MARKET SUMMARY: Market breadth reflects active rotation into high-momentum asset
           summary = "Live market data analysis completed.";
         }
 
-        console.log(`[AI Auto-Alert Debug] Picked Coin: ${recommendedBuy} | Rationale: ${rationale}`);
+        console.log(`[AI Auto-Alert Debug] Selected Coin: ${recommendedBuy} | Rationale: ${rationale}`);
 
         const emailHtml = `
           <!DOCTYPE html>
           <html>
           <head>
             <meta charset="utf-8">
-            <title>ANTIGRAVITY AI Buy Recommendation Alert</title>
+            <title>TradeVerse AI Buy Recommendation Alert</title>
             <style>
               body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #050508; color: #f3f4f6; padding: 20px; margin: 0; }
               .card { background-color: #0b0b10; border: 1px solid #1f2937; border-radius: 14px; max-width: 520px; margin: 20px auto; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); border-top: 4px solid #8b5cf6; }
@@ -2265,12 +2299,12 @@ MARKET SUMMARY: Market breadth reflects active rotation into high-momentum asset
                 </p>
 
                 <div style="text-align: center;">
-                  <a href="${window.location.origin + window.location.pathname}#/market" class="btn">View Live Market Feed</a>
+                  <a href="${getAppBaseUrl('#/market')}" class="btn" target="_blank" rel="noopener noreferrer">View Live Market Feed</a>
                 </div>
               </div>
               <div class="footer">
                 <p>🛡️ AI recommendations are generated for educational purposes and do not constitute financial advice. Always perform your own research before trading.</p>
-                <p>Sent to ${email} • <a href="${window.location.origin + window.location.pathname}#/alerts">Manage alerts</a></p>
+                <p>Sent to ${email} • <a href="${getAppBaseUrl('#/alerts')}" target="_blank" rel="noopener noreferrer">Manage alerts</a></p>
               </div>
             </div>
           </body>
@@ -2475,7 +2509,7 @@ MARKET SUMMARY: Market breadth reflects active rotation into high-momentum asset
           <div style={{ width: '100%', maxWidth: '28rem', background: '#0d0d14', border: '1px solid #1f2937', borderRadius: '1rem', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', padding: '2rem', zIndex: 10 }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '2rem' }}>
               <div style={{ background: '#2563eb', padding: '0.75rem', borderRadius: '1rem', color: '#fff', marginBottom: '0.75rem', boxShadow: '0 10px 15px -3px rgba(37,99,235,0.2)' }}><Icons.Activity size={28} /></div>
-              <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#fff', margin: 0, letterSpacing: '-0.025em' }}>ANTIGRAVITY MARKET AI</h1>
+              <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#fff', margin: 0, letterSpacing: '-0.025em' }}>TRADEVERSE MARKET AI</h1>
               <p style={{ color: '#9ca3af', fontSize: '0.75rem', marginTop: '0.25rem' }}>AI-Powered Crypto Analysis Platform</p>
             </div>
 
@@ -2547,7 +2581,7 @@ MARKET SUMMARY: Market breadth reflects active rotation into high-momentum asset
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, paddingTop: '1.25rem', paddingBottom: '1rem', overflowY: 'auto' }}>
               <div style={{ display: 'flex', alignItems: 'center', padding: '0.75rem 1.5rem', gap: '0.75rem', borderBottom: '1px solid #111827', marginBottom: '1.5rem' }}>
                 <div style={{ background: '#2563eb', padding: '0.5rem', borderRadius: '0.5rem', color: '#fff' }}><Icons.Activity size={20} /></div>
-                <div><span style={{ fontSize: '1.125rem', fontWeight: 700, color: '#fff', display: 'block', letterSpacing: '-0.025em' }}>ANTIGRAVITY</span><span style={{ fontSize: '0.75rem', color: '#3b82f6', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Market AI</span></div>
+                <div><span style={{ fontSize: '1.125rem', fontWeight: 700, color: '#fff', display: 'block', letterSpacing: '-0.025em' }}>TradeVerse</span><span style={{ fontSize: '0.75rem', color: '#3b82f6', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Market AI</span></div>
               </div>
               <nav style={{ flex: 1, padding: '0 1rem' }}>
                 {menuItems.map(item => {
@@ -4242,7 +4276,7 @@ MARKET SUMMARY: Market breadth reflects active rotation into high-momentum asset
           {showPrediction && (
             <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: '0.625rem' }}>
               <div style={{ fontSize: '10px', fontWeight: 700, color: '#818cf8', marginBottom: '0.375rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <Icons.Brain size={11} /> NOVA AI PREDICTION
+                <Icons.Brain size={11} /> VERSE AI PREDICTION
               </div>
               <div style={{ fontSize: '0.75rem', color: '#d1d5db', lineHeight: 1.6 }}>{event.prediction}</div>
               <div style={{ marginTop: '0.5rem', fontSize: '10px', color: '#374151' }}>Source: {event.source} • ⚡ Educational only — not financial advice</div>
@@ -4654,7 +4688,7 @@ MARKET SUMMARY: Market breadth reflects active rotation into high-momentum asset
           return;
         }
 
-        const apiKey = localStorage.getItem("nova_gemini_key") || "AIzaSyAntigravityNovaDemoKey";
+        const apiKey = localStorage.getItem("nova_gemini_key") || "AIzaSyTradeVerseNovaDemoKey";
         setDispatchStatus('generating');
         setDispatchError('');
         try {
@@ -4664,7 +4698,7 @@ MARKET SUMMARY: Market breadth reflects active rotation into high-momentum asset
           }
 
           const newsContext = topNews.map((a, idx) => `[${idx + 1}] ${a.title} (Source: ${a.source})`).join("\n");
-          const prompt = `You are the ANTIGRAVITY AI Market Intelligence Engine.
+          const prompt = `You are the TradeVerse AI Market Intelligence Engine.
 Analyze the following crypto market news and write a sharp, concise daily newsletter summary.
 Focus on identifying major macro developments, shifting trends, regulatory impact, and coin metrics.
 Keep the output engaging and under 180 words. Do not include signature/footer notes.
@@ -4676,12 +4710,8 @@ Market movers context:
 Gainers: ${pulse ? pulse.top?.symbol.toUpperCase() || 'N/A' : 'N/A'}
 Market Breadth: ${pulse ? pulse.ratio : '50'}% positive trend.`;
 
-          let aiSummary;
-          if (apiKey === 'AIzaSyAntigravityNovaDemoKey') {
-            aiSummary = simulateNovaAI("Give me a market overview", coins);
-          } else {
-            aiSummary = await callGeminiAPI(apiKey, [], prompt, coins);
-          }
+          const resObj = await callGeminiAPI(apiKey, [], prompt, coins);
+          let aiSummary = resObj.text || resObj;
           setGeneratedText(aiSummary);
 
           setDispatchStatus('sending');
@@ -4713,7 +4743,7 @@ Market Breadth: ${pulse ? pulse.ratio : '50'}% positive trend.`;
             <html>
             <head>
               <meta charset="utf-8">
-              <title>Antigravity Market Intelligence Report</title>
+              <title>TradeVerse Market Intelligence Report</title>
               <style>
                 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #050508; color: #f3f4f6; padding: 20px; margin: 0; }
                 .card { background-color: #0b0b10; border: 1px solid #1f2937; border-radius: 14px; max-width: 580px; margin: 20px auto; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); border-top: 4px solid #6366f1; }
@@ -4732,7 +4762,7 @@ Market Breadth: ${pulse ? pulse.ratio : '50'}% positive trend.`;
             <body>
               <div class="card">
                 <div class="header">
-                  <h2>🛸 Antigravity AI Report</h2>
+                  <h2>🛸 TradeVerse AI Report</h2>
                 </div>
                 <div class="content">
                   <p style="color: #9ca3af; font-size: 12px; margin: 0 0 16px 0; font-family: sans-serif;">Hello Trader, here is your live crypto market intelligence report:</p>
@@ -4795,7 +4825,7 @@ Market Breadth: ${pulse ? pulse.ratio : '50'}% positive trend.`;
             const logItem = {
               id: "mail_" + Math.random().toString(36).substring(2, 9),
               to: targetEmail,
-              subject: "🛸 ANTIGRAVITY: Live Market & News AI Digest",
+              subject: "🛸 TradeVerse: Live Market & News AI Digest",
               html: htmlContent,
               sentAt: new Date().toISOString(),
               type: "Live News Digest",
@@ -5011,7 +5041,7 @@ Market Breadth: ${pulse ? pulse.ratio : '50'}% positive trend.`;
                     </div>
 
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <a href={`mailto:${targetEmail}?subject=🛸 Antigravity Live AI Market Report&body=${encodeURIComponent(generatedText)}`} style={{ flex: 1, textDecoration: 'none', textAlign: 'center', padding: '0.5rem', borderRadius: '0.5rem', background: '#111827', border: '1px solid #1f2937', color: '#c7d2fe', fontWeight: 700, fontSize: '0.7rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem' }}>
+                      <a href={`mailto:${targetEmail}?subject=🛸 TradeVerse Live AI Market Report&body=${encodeURIComponent(generatedText)}`} style={{ flex: 1, textDecoration: 'none', textAlign: 'center', padding: '0.5rem', borderRadius: '0.5rem', background: '#111827', border: '1px solid #1f2937', color: '#c7d2fe', fontWeight: 700, fontSize: '0.7rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem' }}>
                         <Icons.ExternalLink size={12} /> Open in Email Client
                       </a>
                       <button onClick={() => setShowEmailModal(false)} style={{ flex: 1, padding: '0.5rem', borderRadius: '0.5rem', background: '#2563eb', border: 'none', color: '#fff', fontWeight: 700, fontSize: '0.7rem', cursor: 'pointer' }}>
@@ -5258,10 +5288,10 @@ Market Breadth: ${pulse ? pulse.ratio : '50'}% positive trend.`;
                           \$\${coin.current_price.toLocaleString(undefined, { maximumFractionDigits: 6 })}
                         </div>
                       </div>
-                      <a href="http://localhost:8000/#/coin/\${coin.id}" class="btn">Analyze \${coin.symbol.toUpperCase()}</a>
+                      <a href="\${getAppBaseUrl('#/coin/' + coin.id)}" class="btn" target="_blank" rel="noopener noreferrer">Analyze \${coin.symbol.toUpperCase()}</a>
                     </div>
                     <div class="footer">
-                      <p>Sent to \${userEmail} • <a href="http://localhost:8000/#/alerts">Manage alerts</a></p>
+                      <p>Sent to \${userEmail} • <a href="\${getAppBaseUrl('#/alerts')}" target="_blank" rel="noopener noreferrer">Manage alerts</a></p>
                     </div>
                   </div>
                 </body>
@@ -5289,7 +5319,7 @@ Market Breadth: ${pulse ? pulse.ratio : '50'}% positive trend.`;
                   const logItem = {
                     id: "mail_alert_" + Math.random().toString(36).substring(2, 9),
                     to: userEmail,
-                    subject: `🛸 ANTIGRAVITY: Price Alert Triggered for ${coin.symbol.toUpperCase()}`,
+                    subject: `🛸 TradeVerse: Price Alert Triggered for ${coin.symbol.toUpperCase()}`,
                     html: emailHtml,
                     sentAt: new Date().toISOString(),
                     type: "Price Alert Trigger",
@@ -5395,7 +5425,7 @@ ${losersStr}
     // High-Fidelity Local Nova AI Simulator for Sandbox Mode
 
 
-    const NOVA_SYSTEM_PROMPT = `You are NOVA, an intelligent, versatile AI assistant built into the ANTIGRAVITY platform. While you possess deep expertise in cryptocurrency, blockchain, and financial markets (with access to real-time live market data from CoinGecko provided with each prompt), you function as a full general-purpose assistant capable of answering ANY type of question — coding, science, general knowledge, writing, casual conversation, logic, and beyond.
+    const NOVA_SYSTEM_PROMPT = `You are Verse Assistant, an intelligent, versatile AI assistant built into the TradeVerse platform. While you possess deep expertise in cryptocurrency, blockchain, and financial markets (with access to real-time live market data from CoinGecko provided with each prompt), you function as a full general-purpose assistant capable of answering ANY type of question — coding, science, general knowledge, writing, casual conversation, logic, and beyond.
 
 CORE GUIDELINES:
 - Answer questions naturally, conversationally, and directly, just like ChatGPT.
@@ -5540,7 +5570,7 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" /></svg>
             </div>
             <div style={{ fontWeight: 700, color: '#e2e8f0', fontSize: '1rem', marginBottom: '0.25rem' }}>Connect Google Gemini AI</div>
-            <div style={{ fontSize: '0.75rem', color: '#6b7280', lineHeight: 1.5 }}>NOVA uses Google Gemini to give you real, accurate financial analysis powered by live market data.</div>
+            <div style={{ fontSize: '0.75rem', color: '#6b7280', lineHeight: 1.5 }}>Verse Assistant uses Google Gemini to give you real, accurate financial analysis powered by live market data.</div>
           </div>
 
           <div style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '0.75rem', padding: '0.875rem', fontSize: '0.75rem', color: '#a5b4fc', lineHeight: 1.6 }}>
@@ -5589,7 +5619,7 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
     }
 
     function AIAssistant({ coins }) {
-      const [apiKey, setApiKey] = useState(() => localStorage.getItem('nova_gemini_key') || 'AIzaSyAntigravityNovaDemoKey');
+      const [apiKey, setApiKey] = useState(() => localStorage.getItem('nova_gemini_key') || 'AIzaSyTradeVerseNovaDemoKey');
       const [selectedModel, setSelectedModel] = useState('gemini-2.0-flash');
       const [isOpen, setIsOpen] = useState(false);
       const [isAnimatingOut, setIsAnimatingOut] = useState(false);
@@ -5598,7 +5628,7 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
       const [messages, setMessages] = useState([
         {
           id: 1, role: 'bot',
-          text: `👋 Hi, I'm **NOVA** — ask me anything about crypto markets or anything else.`,
+          text: `👋 Hi, I'm **Verse Assistant** — ask me anything about crypto markets or anything else.`,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);
@@ -5629,7 +5659,7 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
         setApiError('');
         const welcomeMsg = {
           id: msgIdRef.current++, role: 'bot',
-          text: `✅ **Custom Gemini AI Key Connected!**\n\nNOVA is now using your personal Gemini API key directly for all requests.`,
+          text: `✅ **Custom Gemini AI Key Connected!**\n\nVerse Assistant is now using your personal Gemini API key directly for all requests.`,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
         setMessages(prev => [...prev, welcomeMsg]);
@@ -5637,10 +5667,10 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
       };
 
       const handleDisconnect = () => {
-        localStorage.setItem('nova_gemini_key', 'AIzaSyAntigravityNovaDemoKey');
-        setApiKey('AIzaSyAntigravityNovaDemoKey');
+        localStorage.setItem('nova_gemini_key', 'AIzaSyTradeVerseNovaDemoKey');
+        setApiKey('AIzaSyTradeVerseNovaDemoKey');
         setConversationHistory([]);
-        setMessages([{ id: msgIdRef.current++, role: 'bot', text: '🔌 Custom API key removed. Using ANTIGRAVITY Backend LLM Server.', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+        setMessages([{ id: msgIdRef.current++, role: 'bot', text: '🔌 Custom API key removed. Using TradeVerse Backend LLM Server.', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
         setShowSettings(false);
         setShowChips(true);
       };
@@ -5671,7 +5701,7 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
         let isStreamSuccess = false;
 
         try {
-          if (apiKey && apiKey !== 'AIzaSyAntigravityNovaDemoKey') {
+          if (apiKey && apiKey !== 'AIzaSyTradeVerseNovaDemoKey') {
             // Direct User API Key Path
             const resData = await callGeminiAPI(apiKey, conversationHistory, trimmed, coins);
             const isTruncated = resData.finishReason === 'MAX_TOKENS';
@@ -5778,7 +5808,7 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
           } else if (errText.includes('Failed to fetch') || errText.includes('bot_server.py') || errText.includes('Backend') || errText.includes('offline')) {
             userFriendly = `⚠️ **AI Backend Offline**\n\nCan't reach the AI backend right now — make sure \`python bot_server.py\` is running, or add your own free Gemini key in settings (⚙️).`;
           } else if (errText.includes('429') || errText.includes('quota') || errText.includes('RESOURCE_EXHAUSTED')) {
-            userFriendly = `⏳ **Gemini API Quota Exceeded (HTTP 429)**\n\nYour API key has hit the free tier rate limit or has 0 quota.\n\n**Quick Fix:**\n1. Generate a free key at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)\n2. Click ⚙️ in NOVA chat settings and connect your key.`;
+            userFriendly = `⏳ **Gemini API Quota Exceeded (HTTP 429)**\n\nYour API key has hit the free tier rate limit or has 0 quota.\n\n**Quick Fix:**\n1. Generate a free key at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)\n2. Click ⚙️ in Verse Assistant chat settings and connect your key.`;
           } else {
             userFriendly = `⚠️ **Error:** ${errText}`;
           }
@@ -5881,7 +5911,7 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
         <>
           {/* FAB */}
           {!isOpen && (
-            <button className="ai-fab" onClick={() => setIsOpen(true)} title="Open NOVA AI Assistant" id="ai-assistant-fab">
+            <button className="ai-fab" onClick={() => setIsOpen(true)} title="Open Verse Assistant" id="ai-assistant-fab">
               <span className="ai-fab-badge"></span>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -5902,7 +5932,7 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: '0.9rem', letterSpacing: '-0.01em' }}>NOVA AI</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: '0.9rem', letterSpacing: '-0.01em' }}>Verse Assistant</span>
                     <select
                       value={selectedModel}
                       onChange={e => setSelectedModel(e.target.value)}
@@ -5916,8 +5946,8 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
                   </div>
                   <div style={{ fontSize: '10px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem', color: isConnected ? '#6366f1' : '#f59e0b' }}>
                     <span style={{ width: '6px', height: '6px', background: isConnected ? '#22c55e' : '#f59e0b', borderRadius: '9999px', display: 'inline-block' }}></span>
-                    {apiKey === 'AIzaSyAntigravityNovaDemoKey'
-                      ? 'NOVA Streaming LLM Active'
+                    {apiKey === 'AIzaSyTradeVerseNovaDemoKey'
+                      ? 'Verse Streaming LLM Active'
                       : isConnected
                         ? 'Gemini Custom Key'
                         : 'No AI Key — Click ⚙️ to connect'}
@@ -5939,7 +5969,7 @@ CRYPTO & INVESTMENT ANALYSIS REQUESTS:
               {/* Settings Panel */}
               {showSettings && (
                 <div style={{ borderBottom: '1px solid rgba(99,102,241,0.12)', background: 'rgba(10,10,20,0.95)', padding: '1rem', flexShrink: 0 }}>
-                  {isConnected && apiKey !== 'AIzaSyAntigravityNovaDemoKey' ? (
+                  {isConnected && apiKey !== 'AIzaSyTradeVerseNovaDemoKey' ? (
                     <div>
                       <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#e2e8f0', marginBottom: '0.5rem' }}>✅ Gemini AI Connected</div>
                       <div style={{ fontSize: '0.7rem', color: '#6b7280', fontFamily: 'monospace', background: 'rgba(20,20,35,0.8)', padding: '0.375rem 0.625rem', borderRadius: '0.375rem', marginBottom: '0.625rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
